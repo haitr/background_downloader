@@ -615,17 +615,17 @@ public class Downloader: NSObject, FlutterPlugin, URLSessionDelegate, URLSession
     
     //MARK: UNUserNotificationCenterDelegate
     
-    public func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions
-    {
-        if ourCategories.contains(notification.request.content.categoryIdentifier) {
-            if #available(iOS 14.0, *) {
-                return UNNotificationPresentationOptions.list
-            } else {
-                return UNNotificationPresentationOptions.alert
-            }
-        }
-        return []
-    }
+    // public func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions
+    // {
+    //     if ourCategories.contains(notification.request.content.categoryIdentifier) {
+    //         if #available(iOS 14.0, *) {
+    //             return UNNotificationPresentationOptions.list
+    //         } else {
+    //             return UNNotificationPresentationOptions.alert
+    //         }
+    //     }
+    //     return []
+    // }
     
     /// Respond to notification actions (general tap and button taps)
     @MainActor
