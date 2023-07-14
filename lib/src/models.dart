@@ -2,12 +2,12 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'desktop_downloader.dart';
 import 'package:logging/logging.dart';
 import 'package:mime/mime.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
+import 'desktop_downloader.dart';
 import 'exceptions.dart';
 import 'file_downloader.dart';
 
@@ -214,10 +214,10 @@ base class Request {
         httpRequestMethod = jsonMap['httpRequestMethod'] as String? ??
             (jsonMap['post'] == null ? 'GET' : 'POST'),
         post = jsonMap['post'] as String?,
-        retries = jsonMap['retries'] as int? ?? 0,
-        retriesRemaining = jsonMap['retriesRemaining'] as int? ?? 0,
-        creationTime =
-            DateTime.fromMillisecondsSinceEpoch(jsonMap['creationTime'] ?? 0);
+        retries = (jsonMap['retries'] as num?)?.toInt() ?? 0,
+        retriesRemaining = (jsonMap['retriesRemaining'] as num?)?.toInt() ?? 0,
+        creationTime = DateTime.fromMillisecondsSinceEpoch(
+            (jsonMap['creationTime'] as num?)?.toInt() ?? 0);
 
   /// Creates JSON map of this object
   Map<String, dynamic> toJsonMap() => {
@@ -403,9 +403,10 @@ sealed class Task extends Request {
       : taskId = jsonMap['taskId'] ?? '',
         filename = jsonMap['filename'] ?? '',
         directory = jsonMap['directory'] ?? '',
-        baseDirectory = BaseDirectory.values[jsonMap['baseDirectory'] ?? 0],
+        baseDirectory = BaseDirectory
+            .values[(jsonMap['baseDirectory'] as num?)?.toInt() ?? 0],
         group = jsonMap['group'] ?? FileDownloader.defaultGroup,
-        updates = Updates.values[jsonMap['updates'] ?? 0],
+        updates = Updates.values[(jsonMap['updates'] as num?)?.toInt() ?? 0],
         requiresWiFi = jsonMap['requiresWiFi'] ?? false,
         allowPause = jsonMap['allowPause'] ?? false,
         metaData = jsonMap['metaData'] ?? '',
@@ -555,6 +556,9 @@ final class DownloadTask extends Task {
   /// If [unique] is true, the filename is guaranteed not to already exist. This
   /// is accomplished by adding a suffix to the suggested filename with a number,
   /// e.g. "data (2).txt"
+  ///
+  /// The suggested filename is obtained by making a HEAD request to the url
+  /// represented by the [DownloadTask], including urlQueryParameters and headers
   Future<DownloadTask> withSuggestedFilename({unique = false}) async {
     /// Returns [DownloadTask] with a filename similar to the one
     /// supplied, but unused.
@@ -632,6 +636,26 @@ final class DownloadTask extends Task {
     // if everything fails, return the task with unchanged filename
     // except for possibly making it unique
     return uniqueFilename(this, unique);
+  }
+
+  /// Return the expected file size for this task, or -1 if unknown
+  ///
+  /// The expected file size is obtained by making a HEAD request to the url
+  /// represented by the [DownloadTask], including urlQueryParameters and headers
+  Future<int> expectedFileSize() async {
+    try {
+      final response = await DesktopDownloader.httpClient
+          .head(Uri.parse(url), headers: headers);
+      if ([200, 201, 202, 203, 204, 205, 206].contains(response.statusCode)) {
+        return int.parse(response.headers.entries
+            .firstWhere(
+                (element) => element.key.toLowerCase() == 'content-length')
+            .value);
+      }
+    } catch (e) {
+      // no content length available
+    }
+    return -1;
   }
 
   @override
@@ -838,6 +862,13 @@ sealed class TaskUpdate {
   final Task task;
 
   const TaskUpdate(this.task);
+
+  /// Create object from JSON Map
+  TaskUpdate.fromJsonMap(Map<String, dynamic> jsonMap)
+      : task = Task.createFromJsonMap(jsonMap);
+
+  /// Return JSON Map representing object
+  Map<String, dynamic> toJsonMap() => task.toJsonMap();
 }
 
 /// A status update
@@ -849,6 +880,23 @@ class TaskStatusUpdate extends TaskUpdate {
   final TaskException? exception;
 
   const TaskStatusUpdate(super.task, this.status, [this.exception]);
+
+  /// Create object from JSON Map
+  TaskStatusUpdate.fromJsonMap(Map<String, dynamic> jsonMap)
+      : status =
+            TaskStatus.values[(jsonMap['taskStatus'] as num?)?.toInt() ?? 0],
+        exception = jsonMap['exception'] != null
+            ? TaskException.fromJsonMap(jsonMap['exception'])
+            : null,
+        super.fromJsonMap(jsonMap);
+
+  /// Return JSON Map representing object
+  @override
+  Map<String, dynamic> toJsonMap() => {
+        ...super.toJsonMap(),
+        'taskStatus': status.index,
+        'exception': exception?.toJsonMap()
+      };
 }
 
 /// A progress update
@@ -859,10 +907,31 @@ class TaskStatusUpdate extends TaskUpdate {
 /// [TaskStatus.canceled] results in progress -2.0
 /// [TaskStatus.notFound] results in progress -3.0
 /// [TaskStatus.waitingToRetry] results in progress -4.0
+///
+/// [expectedFileSize] will only be representative if the 0 < [progress] < 1,
+/// so NOT representative when progress == 0 or progress == 1, and
+/// will be -1 if the file size is not provided by the server or otherwise
+/// not known.
 class TaskProgressUpdate extends TaskUpdate {
   final double progress;
+  final int expectedFileSize;
 
-  const TaskProgressUpdate(super.task, this.progress);
+  const TaskProgressUpdate(super.task, this.progress,
+      [this.expectedFileSize = -1]);
+
+  /// Create object from JSON Map
+  TaskProgressUpdate.fromJsonMap(Map<String, dynamic> jsonMap)
+      : progress = (jsonMap['progress'] as num?)?.toDouble() ?? progressFailed,
+        expectedFileSize = (jsonMap['expectedFileSize'] as num?)?.toInt() ?? -1,
+        super.fromJsonMap(jsonMap);
+
+  /// Return JSON Map representing object
+  @override
+  Map<String, dynamic> toJsonMap() => {
+        ...super.toJsonMap(),
+        'progress': progress,
+        'expectedFileSize': expectedFileSize
+      };
 }
 
 // Progress values representing a status
@@ -885,7 +954,8 @@ class ResumeData {
   ResumeData.fromJsonMap(Map<String, dynamic> jsonMap)
       : task = Task.createFromJsonMap(jsonMap['task']),
         data = jsonMap['data'] as String,
-        requiredStartByte = jsonMap['requiredStartByte'] as int;
+        requiredStartByte =
+            (jsonMap['requiredStartByte'] as num?)?.toInt() ?? 0;
 
   /// Return JSON Map representing object
   Map<String, dynamic> toJsonMap() => {

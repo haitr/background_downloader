@@ -12,7 +12,7 @@ import 'models.dart';
 /// Implementation of download functionality for native platforms
 ///
 /// Uses [MethodChannel] to communicate with native platforms
-class NativeDownloader extends BaseDownloader {
+final class NativeDownloader extends BaseDownloader {
   static final NativeDownloader _singleton = NativeDownloader._internal();
   static const _channel = MethodChannel('com.bbflight.background_downloader');
   static const _backgroundChannel =
@@ -44,6 +44,7 @@ class NativeDownloader extends BaseDownloader {
       switch (message) {
         case ('statusUpdate', int statusOrdinal):
           final status = TaskStatus.values[statusOrdinal];
+          await killFailedTask(task, status);
           processStatusUpdate(TaskStatusUpdate(task, status));
 
         case (
@@ -56,6 +57,7 @@ class NativeDownloader extends BaseDownloader {
             ]
           ):
           final status = TaskStatus.values[statusOrdinal];
+          await killFailedTask(task, status);
           TaskException? exception;
           if (status == TaskStatus.failed) {
             exception = TaskException.fromTypeString(
@@ -63,8 +65,9 @@ class NativeDownloader extends BaseDownloader {
           }
           processStatusUpdate(TaskStatusUpdate(task, status, exception));
 
-        case ('progressUpdate', double progress):
-          processProgressUpdate(TaskProgressUpdate(task, progress));
+        case ('progressUpdate', [double progress, int expectedFileSize]):
+          processProgressUpdate(
+              TaskProgressUpdate(task, progress, expectedFileSize));
 
         case ('canResume', bool canResume):
           setCanResume(task, canResume);
@@ -119,6 +122,16 @@ class NativeDownloader extends BaseDownloader {
   @override
   Future<bool> cancelPlatformTasksWithIds(List<String> taskIds) async =>
       await _channel.invokeMethod<bool>('cancelTasksWithIds', taskIds) ?? false;
+
+  /// Kills the task if it failed, on Android only
+  ///
+  /// See methodKillTaskWithId in the Android plugin for explanation
+  Future<void> killFailedTask(Task task, TaskStatus status) async {
+    if (Platform.isAndroid &&
+        (status == TaskStatus.failed || status == TaskStatus.canceled)) {
+      _channel.invokeMethod('killTaskWithId', task.taskId);
+    }
+  }
 
   @override
   Future<Task?> taskForId(String taskId) async {
@@ -195,6 +208,12 @@ class NativeDownloader extends BaseDownloader {
           SharedStorage destination, String directory, String? mimeType) =>
       _channel.invokeMethod<String?>('moveToSharedStorage',
           [filePath, destination.index, directory, mimeType]);
+
+  @override
+  Future<String?> pathInSharedStorage(
+          String filePath, SharedStorage destination, String directory) =>
+      _channel.invokeMethod<String?>(
+          'pathInSharedStorage', [filePath, destination.index, directory]);
 
   @override
   Future<bool> openFile(Task? task, String? filePath, String? mimeType) async {

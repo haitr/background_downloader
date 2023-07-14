@@ -78,6 +78,8 @@ public class Downloader: NSObject, FlutterPlugin, URLSessionDelegate, URLSession
             methodPopProgressUpdates(result: result)
         case "moveToSharedStorage":
             methodMoveToSharedStorage(call: call, result: result)
+        case "pathInSharedStorage":
+            methodPathInSharedStorage(call: call, result: result)
         case "openFile":
             methodOpenFile(call: call, result: result)
         case "forceFailPostOnBackgroundChannel":
@@ -321,6 +323,21 @@ public class Downloader: NSObject, FlutterPlugin, URLSessionDelegate, URLSession
         result(moveToSharedStorage(filePath: filePath, destination: destination, directory: directory))
     }
 
+    /// Returns path to file in a SharedStorage destination, or null
+    private func methodPathInSharedStorage(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        let args = call.arguments as! [Any]
+        let filePath = args[0] as! String
+        guard
+            let destination = SharedStorage.init(rawValue: args[1] as! Int)
+        else {
+            result(nil)
+            return
+        }
+        let directory = args[2] as! String
+        result(pathInSharedStorage(filePath: filePath, destination: destination, directory: directory))
+    }
+
+    
     /// Opens to file represented by the Task or filePath using iOS standard
     ///
     /// Results in true if successful
@@ -430,7 +447,9 @@ public class Downloader: NSObject, FlutterPlugin, URLSessionDelegate, URLSession
                     os_log("Paused task with id %@", log: log, type: .info, task.taskId)
                     processStatusUpdate(task: task, status: .paused)
                     if isDownloadTask(task: task) {
-                        updateNotification(task: task, notificationType: .paused, notificationConfig: notificationConfig)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            updateNotification(task: task, notificationType: .paused, notificationConfig: notificationConfig)
+                        }
                     }
                     Downloader.lastProgressUpdate.removeValue(forKey: task.taskId) // ensure .running update on resume
                     return
@@ -449,7 +468,7 @@ public class Downloader: NSObject, FlutterPlugin, URLSessionDelegate, URLSession
             }
             return
         }
-        os_log("Fnished task with id %@", log: log, type: .info, task.taskId)
+        os_log("Finished task with id %@", log: log, type: .info, task.taskId)
         // if this is an upload task, send final TaskStatus (based on HTTP status code
         if isUploadTask(task: task) {
             var taskException = TaskException(type: .httpResponse, httpResponseCode: responseStatusCode, description: responseStatusDescription)
@@ -493,7 +512,7 @@ public class Downloader: NSObject, FlutterPlugin, URLSessionDelegate, URLSession
         if totalBytesExpectedToWrite != NSURLSessionTransferSizeUnknown && Date() > Downloader.nextProgressUpdateTime[task.taskId] ?? Date(timeIntervalSince1970: 0) {
             let progress = min(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite), 0.999)
             if progress - (Downloader.lastProgressUpdate[task.taskId] ?? 0.0) > 0.02 {
-                processProgressUpdate(task: task, progress: progress)
+                processProgressUpdate(task: task, progress: progress, expectedFileSize: totalBytesExpectedToWrite)
                 Downloader.lastProgressUpdate[task.taskId] = progress
                 Downloader.nextProgressUpdateTime[task.taskId] = Date().addingTimeInterval(0.5)
             }
@@ -664,7 +683,9 @@ public class Downloader: NSObject, FlutterPlugin, URLSessionDelegate, URLSession
                 if resumeDataAsBase64String.isEmpty {
                     os_log("Resume data for taskId %@ no longer available: restarting", log: log, type: .info)
                 }
-                doEnqueue(taskJsonString: userInfo["task"] as! String, notificationConfigJsonString: userInfo["notificationConfig"] as? String, resumeDataAsBase64String: resumeDataAsBase64String, result: nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.doEnqueue(taskJsonString: userInfo["task"] as! String, notificationConfigJsonString: userInfo["notificationConfig"] as? String, resumeDataAsBase64String: resumeDataAsBase64String, result: nil)
+                }
                 
             case UNNotificationDefaultActionIdentifier:
                 _ = postOnBackgroundChannel(method: "notificationTap", task: task, arg: userInfo["notificationType"] as! Int)

@@ -67,30 +67,27 @@ func processStatusUpdate(task: Task, status: TaskStatus, taskException: TaskExce
     // A 'failed' progress update is only provided if
     // a retry is not needed: if it is needed, a `waitingToRetry` progress update
     // will be generated on the Dart side
-    if isFinalState(status: status) {
-        switch (status) {
-        case .complete:
-            processProgressUpdate(task: task, progress: 1.0)
-        case .failed:
-            if !retryNeeded {
-                processProgressUpdate(task: task, progress: -1.0)
-            }
-        case .canceled:
-            processProgressUpdate(task: task, progress: -2.0)
-        case .notFound:
-            processProgressUpdate(task: task, progress: -3.0)
-        default:
-            break
+    switch (status) {
+    case .complete:
+        processProgressUpdate(task: task, progress: 1.0)
+    case .failed:
+        if !retryNeeded {
+            processProgressUpdate(task: task, progress: -1.0)
         }
-        // remove from persistent storage
-        Downloader.lastProgressUpdate.removeValue(forKey: task.taskId)
-        Downloader.nextProgressUpdateTime.removeValue(forKey: task.taskId)
-        Downloader.localResumeData.removeValue(forKey: task.taskId)
+    case .canceled:
+        processProgressUpdate(task: task, progress: -2.0)
+    case .notFound:
+        processProgressUpdate(task: task, progress: -3.0)
+    case .paused:
+        processProgressUpdate(task: task, progress: -5.0)
+    default:
+        break
     }
+
     if providesStatusUpdates(downloadTask: task) || retryNeeded {
         let finalTaskException = taskException == nil ? TaskException(type: .general,
                                                            httpResponseCode: -1, description: "") : taskException
-        let arg: Any = status == .failed ? [status.rawValue, finalTaskException!.type.rawValue, finalTaskException!.description, finalTaskException!.httpResponseCode] : status.rawValue
+        let arg: Any = status == .failed ? [status.rawValue, finalTaskException!.type.rawValue, finalTaskException!.description, finalTaskException!.httpResponseCode] as [Any] : status.rawValue
         if !postOnBackgroundChannel(method: "statusUpdate", task: task, arg: arg) {
             // store update locally as a merged task/status JSON string, without error info
             guard let jsonData = try? JSONEncoder().encode(task),
@@ -102,15 +99,21 @@ func processStatusUpdate(task: Task, status: TaskStatus, taskException: TaskExce
             storeLocally(prefsKey: Downloader.keyStatusUpdateMap, taskId: task.taskId, item: jsonObject)
         }
     }
+    if isFinalState(status: status) {
+        // remove from persistent storage
+        Downloader.lastProgressUpdate.removeValue(forKey: task.taskId)
+        Downloader.nextProgressUpdateTime.removeValue(forKey: task.taskId)
+        Downloader.localResumeData.removeValue(forKey: task.taskId)
+    }
 }
 
 
 /// Processes a progress update for the task
 ///
 /// Sends progress update via the background channel to Dart, if requested
-func processProgressUpdate(task: Task, progress: Double) {
+func processProgressUpdate(task: Task, progress: Double, expectedFileSize: Int64 = -1) {
     if providesProgressUpdates(task: task) {
-        if (!postOnBackgroundChannel(method: "progressUpdate", task: task, arg: progress)) {
+        if (!postOnBackgroundChannel(method: "progressUpdate", task: task, arg: [progress, expectedFileSize])) {
             // store update locally as a merged task/progress JSON string
             guard let jsonData = try? JSONEncoder().encode(task),
                   var jsonObject = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
@@ -118,6 +121,7 @@ func processProgressUpdate(task: Task, progress: Double) {
                 os_log("Could not store progress update locally", log: log, type: .info)
                 return }
             jsonObject["progress"] = progress
+            jsonObject["expectedFileSize"] = expectedFileSize
             storeLocally(prefsKey: Downloader.keyProgressUpdateMap, taskId: task.taskId, item: jsonObject)
         }
     }
@@ -139,7 +143,7 @@ func processCanResume(task: Task, taskCanResume: Bool) {
 func processResumeData(task: Task, resumeData: Data) -> Bool {
     let resumeDataAsBase64String = resumeData.base64EncodedString()
     Downloader.localResumeData[task.taskId] = resumeDataAsBase64String
-    if !postOnBackgroundChannel(method: "resumeData", task: task, arg: [resumeDataAsBase64String, 0 as Int64]) {
+    if !postOnBackgroundChannel(method: "resumeData", task: task, arg: [resumeDataAsBase64String, 0 as Int64] as [Any]) {
         // store resume data locally
         guard let jsonData = try? JSONEncoder().encode(task),
               var taskJsonObject = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]

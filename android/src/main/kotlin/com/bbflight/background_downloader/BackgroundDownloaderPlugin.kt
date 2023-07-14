@@ -221,9 +221,9 @@ class BackgroundDownloaderPlugin : FlutterPlugin, MethodCallHandler, ActivityAwa
     }
 
     private var channel: MethodChannel? = null
-    lateinit var applicationContext: Context
-    var pauseReceiver: NotificationRcvr? = null
-    var resumeReceiver: NotificationRcvr? = null
+    private lateinit var applicationContext: Context
+    private var pauseReceiver: NotificationRcvr? = null
+    private var resumeReceiver: NotificationRcvr? = null
     private var scope: CoroutineScope? = null
 
     /**
@@ -290,6 +290,7 @@ class BackgroundDownloaderPlugin : FlutterPlugin, MethodCallHandler, ActivityAwa
                 "reset" -> methodReset(call, result)
                 "allTasks" -> methodAllTasks(call, result)
                 "cancelTasksWithIds" -> methodCancelTasksWithIds(call, result)
+                "killTaskWithId" -> methodKillTaskWithId(call, result)
                 "taskForId" -> methodTaskForId(call, result)
                 "pause" -> methodPause(call, result)
                 "popResumeData" -> methodPopResumeData(result)
@@ -297,6 +298,7 @@ class BackgroundDownloaderPlugin : FlutterPlugin, MethodCallHandler, ActivityAwa
                 "popProgressUpdates" -> methodPopProgressUpdates(result)
                 "getTaskTimeout" -> methodGetTaskTimeout(result)
                 "moveToSharedStorage" -> methodMoveToSharedStorage(call, result)
+                "pathInSharedStorage" -> methodPathInSharedStorage(call, result)
                 "openFile" -> methodOpenFile(call, result)
                 "forceFailPostOnBackgroundChannel" -> methodForceFailPostOnBackgroundChannel(
                     call, result
@@ -404,6 +406,32 @@ class BackgroundDownloaderPlugin : FlutterPlugin, MethodCallHandler, ActivityAwa
         result.success(success)
     }
 
+    /**
+     * Kills task with taskId provided as argument in call
+     *
+     * Killing differs from canceling in that it only removes the task from the WorkManager
+     * schedule, without emitting any status updates. It is used to prevent the WorkManager from
+     * rescheduling WorkManager tasks that are canceled because a constraint is no longer met, e.g.
+     * network disconnect. We want to handle such errors ourselves, using our retry mechanism,
+     * and not let the WorkManager reschedule those tasks.  The killTask method is therefore called
+     * whenever a task emits a 'failed' update, as we have no way to determine if the task failed
+     * with the worker 'SUCCESS' or with the worker 'CANCELED'
+     */
+    private fun methodKillTaskWithId(call: MethodCall, result: Result) {
+        val taskId = call.arguments as String
+        val workManager = WorkManager.getInstance(applicationContext)
+        val operation = workManager.cancelAllWorkByTag("taskId=$taskId")
+        try {
+            operation.result.get()
+        } catch (e: Throwable) {
+            Log.w(
+                TAG,
+                "Could not kill task wih id $taskId in operation: $operation"
+            )
+        }
+        result.success(null)
+    }
+
     /** Returns Task for this taskId, or nil */
     private fun methodTaskForId(call: MethodCall, result: Result) {
         val taskId = call.arguments as String
@@ -445,7 +473,7 @@ class BackgroundDownloaderPlugin : FlutterPlugin, MethodCallHandler, ActivityAwa
     }
 
     /**
-     * Returns a JSON String of a map of [ResumeData], keyed by taskId, that has veen stored
+     * Returns a JSON String of a map of [ResumeData], keyed by taskId, that has been stored
      * in local shared preferences because they could not be delivered to the Dart side.
      * Local storage of this map is then cleared
      */
@@ -474,6 +502,7 @@ class BackgroundDownloaderPlugin : FlutterPlugin, MethodCallHandler, ActivityAwa
      * - filePath (String): full path to file to be moved
      * - destination (Int as index into [SharedStorage] enum)
      * - directory (String): subdirectory within scoped storage
+     * - mimeType (String?): mimeType of the file, overrides derived mimeType
      */
     private fun methodMoveToSharedStorage(call: MethodCall, result: Result) {
         val args = call.arguments as List<*>
@@ -513,6 +542,25 @@ class BackgroundDownloaderPlugin : FlutterPlugin, MethodCallHandler, ActivityAwa
     }
 
     /**
+     * Returns path to file in Android scoped/shared storage, or null
+     *
+     * Call arguments:
+     * - filePath (String): full path to file (only the name is used)
+     * - destination (Int as index into [SharedStorage] enum)
+     * - directory (String): subdirectory within scoped storage (ignored for Q+)
+     *
+     * For Android Q+ uses the MediaStore, matching on filename only, i.e. ignoring
+     * the directory
+     */
+    private fun methodPathInSharedStorage(call: MethodCall, result: Result) {
+        val args = call.arguments as List<*>
+        val filePath = args[0] as String
+        val destination = SharedStorage.values()[args[1] as Int]
+        val directory = args[2] as String
+        result.success(pathInSharedStorage(applicationContext, filePath, destination, directory))
+    }
+
+        /**
      * Open the file represented by the task, with optional mimeType
      *
      * Call arguments are [taskJsonMapString, filename, mimeType] with precondition that either
@@ -553,7 +601,7 @@ class BackgroundDownloaderPlugin : FlutterPlugin, MethodCallHandler, ActivityAwa
     /**
      * Handle intent if received from tapping a notification
      *
-     * This may be called on statup of the application and at that time the [backgroundChannel] and
+     * This may be called on startup of the application and at that time the [backgroundChannel] and
      * its listener may not have been initialized yet. This function therefore includes retry logic.
      */
     private fun handleIntent(intent: Intent?): Boolean {

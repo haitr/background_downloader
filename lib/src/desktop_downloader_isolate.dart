@@ -430,7 +430,8 @@ Future<TaskStatus> transferBytes(
         if (contentLength > 0 &&
             (progress - lastProgressUpdate > 0.02 &&
                 now.isAfter(nextProgressUpdateTime))) {
-          processProgressUpdateInIsolate(task, progress, sendPort);
+          processProgressUpdateInIsolate(
+              task, progress, sendPort, contentLength);
           lastProgressUpdate = progress;
           nextProgressUpdateTime = now.add(const Duration(milliseconds: 500));
         }
@@ -453,27 +454,28 @@ Future<TaskStatus> transferBytes(
 void processStatusUpdateInIsolate(
     Task task, TaskStatus status, SendPort sendPort) {
   final retryNeeded = status == TaskStatus.failed && task.retriesRemaining > 0;
-// if task is in final state, process a final progressUpdate
-// A 'failed' progress update is only provided if
-// a retry is not needed: if it is needed, a `waitingToRetry` progress update
-// will be generated in the FileDownloader
-  if (status.isFinalState) {
-    switch (status) {
-      case TaskStatus.complete:
-        processProgressUpdateInIsolate(task, progressComplete, sendPort);
+  // if task is in final state, process a final progressUpdate
+  // A 'failed' progress update is only provided if
+  // a retry is not needed: if it is needed, a `waitingToRetry` progress update
+  // will be generated in the FileDownloader
+  switch (status) {
+    case TaskStatus.complete:
+      processProgressUpdateInIsolate(task, progressComplete, sendPort);
 
-      case TaskStatus.failed when !retryNeeded:
-        processProgressUpdateInIsolate(task, progressFailed, sendPort);
+    case TaskStatus.failed when !retryNeeded:
+      processProgressUpdateInIsolate(task, progressFailed, sendPort);
 
-      case TaskStatus.canceled:
-        processProgressUpdateInIsolate(task, progressCanceled, sendPort);
+    case TaskStatus.canceled:
+      processProgressUpdateInIsolate(task, progressCanceled, sendPort);
 
-      case TaskStatus.notFound:
-        processProgressUpdateInIsolate(task, progressNotFound, sendPort);
+    case TaskStatus.notFound:
+      processProgressUpdateInIsolate(task, progressNotFound, sendPort);
 
-      default:
-        {}
-    }
+    case TaskStatus.paused:
+      processProgressUpdateInIsolate(task, progressPaused, sendPort);
+
+    default:
+      {}
   }
 // Post update if task expects one, or if failed and retry is needed
   if (task.providesStatusUpdates || retryNeeded) {
@@ -491,9 +493,10 @@ void processStatusUpdateInIsolate(
 ///
 /// Sends progress update via the [sendPort], if requested
 void processProgressUpdateInIsolate(
-    Task task, double progress, SendPort sendPort) {
+    Task task, double progress, SendPort sendPort,
+    [int expectedFileSize = -1]) {
   if (task.providesProgressUpdates) {
-    sendPort.send(('progressUpdate', progress));
+    sendPort.send(('progressUpdate', progress, expectedFileSize));
   }
 }
 

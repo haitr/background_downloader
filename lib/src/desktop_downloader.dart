@@ -23,7 +23,7 @@ const okResponses = [200, 201, 202, 203, 204, 205, 206];
 /// On desktop (MacOS, Linux, Windows) the download and upload are implemented
 /// in Dart, as there is no native platform equivalent of URLSession or
 /// WorkManager as there is on iOS and Android
-class DesktopDownloader extends BaseDownloader {
+final class DesktopDownloader extends BaseDownloader {
   final _log = Logger('DesktopDownloader');
   final maxConcurrent = 5;
   static final DesktopDownloader _singleton = DesktopDownloader._internal();
@@ -108,8 +108,9 @@ class DesktopDownloader extends BaseDownloader {
         case 'done':
           receivePort.close();
 
-        case ('progressUpdate', double progress):
-          processProgressUpdate(TaskProgressUpdate(task, progress));
+        case ('progressUpdate', double progress, int expectedFileSize):
+          processProgressUpdate(
+              TaskProgressUpdate(task, progress, expectedFileSize));
 
         case ('taskCanResume', bool taskCanResume):
           setCanResume(task, taskCanResume);
@@ -129,7 +130,7 @@ class DesktopDownloader extends BaseDownloader {
 
         default:
           _log.warning('Received message with unknown type '
-              '${message.runtimeType} from Isolate');
+              '$message from Isolate');
       }
     }
     errorPort.close();
@@ -240,9 +241,46 @@ class DesktopDownloader extends BaseDownloader {
   @override
   Future<String?> moveToSharedStorage(String filePath,
       SharedStorage destination, String directory, String? mimeType) async {
+    final destDirectoryPath =
+        await getDestinationDirectoryPath(destination, directory);
+    if (destDirectoryPath == null) {
+      return null;
+    }
+    if (!await Directory(destDirectoryPath).exists()) {
+      await Directory(destDirectoryPath).create(recursive: true);
+    }
+    final fileName = path.basename(filePath);
+    final destFilePath = path.join(destDirectoryPath, fileName);
+    try {
+      await File(filePath).rename(destFilePath);
+    } on FileSystemException catch (e) {
+      _log.warning('Error moving $filePath to shared storage: $e');
+      return null;
+    }
+    return destFilePath;
+  }
+
+  @override
+  Future<String?> pathInSharedStorage(
+      String filePath, SharedStorage destination, String directory) async {
+    final destDirectoryPath =
+        await getDestinationDirectoryPath(destination, directory);
+    if (destDirectoryPath == null) {
+      return null;
+    }
+    final fileName = path.basename(filePath);
+    return path.join(destDirectoryPath, fileName);
+  }
+
+  /// Returns the path of the destination directory in shared storage, or null
+  ///
+  /// Only the .Downloads directory is supported on desktop.
+  /// The [directory] is appended to the base Downloads directory.
+  /// The directory at the returned path is not guaranteed to exist.
+  Future<String?> getDestinationDirectoryPath(
+      SharedStorage destination, String directory) async {
     if (destination != SharedStorage.downloads) {
-      _log.finer(
-          'moveToSharedStorage on desktop only supports .downloads destination');
+      _log.finer('Desktop only supports .downloads destination');
       return null;
     }
     final downloadsDirectory = await getDownloadsDirectory();
@@ -253,21 +291,9 @@ class DesktopDownloader extends BaseDownloader {
     // remove leading and trailing slashes from [directory]
     var cleanDirectory = directory.replaceAll(RegExp(r'^/+'), '');
     cleanDirectory = cleanDirectory.replaceAll(RegExp(r'/$'), '');
-    final destDirectory = cleanDirectory.isEmpty
+    return cleanDirectory.isEmpty
         ? downloadsDirectory.path
         : path.join(downloadsDirectory.path, cleanDirectory);
-    if (!await Directory(destDirectory).exists()) {
-      await Directory(destDirectory).create(recursive: true);
-    }
-    final fileName = path.basename(filePath);
-    final destFilePath = path.join(destDirectory, fileName);
-    try {
-      await File(filePath).rename(destFilePath);
-    } on FileSystemException catch (e) {
-      _log.warning('Error moving $filePath to shared storage: $e');
-      return null;
-    }
-    return destFilePath;
   }
 
   @override

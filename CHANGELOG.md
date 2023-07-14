@@ -1,3 +1,66 @@
+## 7.5.0
+
+* Added `pathInSharedStorage` method, which obtains the path to a file moved to shared storage.
+
+To check if a file exists in shared storage, obtain the path to the file by calling
+`pathInSharedStorage` and, if not null, check if that file exists.
+
+__On Android 29+:__ If you
+have generated a version with an indexed name (e.g. 'myFile (1).txt'), then only the most recently stored version is available this way, even if an earlier version actually does exist. Also, only files stored by your app will be returned via this call, as you don't have access to files stored by other apps.
+
+__On iOS:__ To make files visible in the Files browser, do not move them to shared storage. Instead, download the file to the `BaseDirectory.applicationDocuments` and add the following to your `Info.plist`:
+```
+<key>LSSupportsOpeningDocumentsInPlace</key>
+<true/>
+<key>UIFileSharingEnabled</key>
+<true/>
+```
+This will make all files in your app's `Documents` directory visible to the Files browser.
+
+* Fixed bug when download is interrupted due to lost network connection (on Android)
+* Fixed bug with `moveToSharedStorage` on iOS: shared storage is now 'faked' on iOS, creating 
+subdirectories of the regular Documents directory, as iOS apps do not have access to shared 
+media and download directories
+* Fixed bug with notifications disappearing on iOS
+
+## 7.4.1
+
+Bug fix for type cast errors and for thread safety on iOS for notifications
+
+## 7.4.0
+
+Added method `expectedFileSize()` to `DownloadTask`, and added field `expectedFileSize` to  
+`TaskProgressUpdate` (provided to callbacks or listeners during download), and `TaskRecord` 
+entries in the database. 
+Note that this field is only valid when 0 < progress < 1. It is -1 if file size cannot be determined. 
+
+## 7.3.1
+
+Improved [DownloadProgressIndicator](https://pub.dev/documentation/background_downloader/latest/background_downloader/DownloadProgressIndicator-class.html) widget:
+* In collapsed state, now shows progress as 'n' files finished out of 'total' started (and progress as that fraction)
+* Option to force collapsed state always by setting `maxExpandable` to 0. When set to 1, the indicator collapses only when the second download starts. When set greater than 1, the indicator expands to show multiple simultaneous downloads.
+
+Added usage examples upfront in the readme
+
+## 7.3.0
+
+Added [DownloadProgressIndicator](https://pub.dev/documentation/background_downloader/latest/background_downloader/DownloadProgressIndicator-class.html) widget and modified the example app to show how to wire it up.
+
+The widget is configurable (e.g. pause and cancel buttons) and can show multiple downloads simultaneously in either an expanded
+or collapsed mode.
+
+If tracking downloads in persistent storage, pausing a file now does not override the stored progress with `progressPaused`.
+
+Fixed bugs.
+
+## 7.2.0
+
+Added option to use a different persistent storage solution than the one provided by default. The downloader stores a few things in persistent storage, and uses a modified version of the [localstore](https://pub.dev/packages/localstore) package by default. To use a different persistent storage solution, create a class that implements the [PersistentStorage](https://pub.dev/documentation/background_downloader/latest/background_downloader/PersistentStorage-class.html) interface, and initialize the downloader by calling `FileDownloader(persistentStorage: yourStorageClass())` as the first use of the `FileDownloader`.
+
+A simple example is included in the example app (using the [sqflite](https://pub.dev/packages/sqflite) package).
+
+Fixed a few bugs.
+
 ## 7.1.0
 
 Added `tasksFinished` method that returns `true` if all tasks in the group have finished
@@ -61,7 +124,7 @@ Breaking changes:
 * The `trackTasks` method no longer takes a `group` argument, and starts tracking for all tasks, regardless of group. If you need tracking only for a specific group, call the new `trackTasksInGroup` method
 
 Other changes (non-breaking):
-* You can override the `httpRequestMethod` used for requests by setting it in the `Request`, `DownloadTask` or `UploadTask`. By default, requests and downloads use GET (unless `post` is set) and uploads use PUT
+* You can override the `httpRequestMethod` used for requests by setting it in the `Request`, `DownloadTask` or `UploadTask`. By default, requests and downloads use GET (unless `post` is set) and uploads use POST
 * The `download`, `upload`, `downloadBatch` and `uploadBatch` methods now take an optional `onElapsedTime` callback that is called at regular intervals (defined by the optional `elapsedTimeInterval` which defaults to 5 seconds) with the time elapsed since the call was made. This can be used to trigger UI warnings (e.g. 'this is taking rather long') or to cancel the task if it does not complete within a desired time. For performance reasons the `elapsedTimeInterval` should not be set to a value less than one second, and this mechanism should not be used to indicate progress.
 * If a task fails, the `TaskStatusUpdate` will contain a `TaskException` that provides information about the type of exception (e.g. a `TaskFileSystemException` indicates an issue with storing or retrieving the file) and contains a `description` and (for `TaskHttpException` only) the `httpResponseCode`. If tasks are tracked, the  The following `TaskException` subtypes may occur:
   - `TaskException` (general exception)
