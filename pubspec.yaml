@@ -6,13 +6,13 @@ repository: https://github.com/781flyingdutchman/background_downloader
 
 environment:
   sdk: ^3.0.0
-  flutter:  '>=3.0.0'
+  flutter: ">=3.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
   logging: ^1.0.2
-  http: '>=0.13.0 <2.0.0'
+  http: ^1.0.0
   path_provider: ^2.0.2
   path: ^1.8.1
   async: ^2.6.0
@@ -30,7 +30,6 @@ platforms:
   linux:
   macos:
   windows:
-
 
 flutter:
   plugin:
